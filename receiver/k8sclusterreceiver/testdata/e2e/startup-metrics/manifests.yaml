@@ -1,0 +1,166 @@
+## ServiceAccount, ClusterRole, ClusterRoleBinding for the collector
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otelcol-startup-test
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otelcol-startup-test
+rules:
+  - apiGroups: [""]
+    resources:
+      - events
+      - namespaces
+      - namespaces/status
+      - nodes
+      - nodes/spec
+      - pods
+      - pods/status
+      - replicationcontrollers
+      - replicationcontrollers/status
+      - resourcequotas
+      - services
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [daemonsets, deployments, replicasets, statefulsets]
+    verbs: [get, list, watch]
+  - apiGroups: [extensions]
+    resources: [daemonsets, deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otelcol-startup-test
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otelcol-startup-test
+subjects:
+  - kind: ServiceAccount
+    name: otelcol-startup-test
+    namespace: default
+---
+## Collector ConfigMap — enables all startup duration metrics and uses debug exporter
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-startup-test-config
+  namespace: default
+data:
+  relay.yaml: |
+    receivers:
+      k8s_cluster:
+        collection_interval: 10s
+        metrics:
+          k8s.pod.startup_duration:
+            enabled: true
+          k8s.pod.scheduling_duration:
+            enabled: true
+          k8s.pod.initializing_duration:
+            enabled: true
+          k8s.pod.containers_ready_duration:
+            enabled: true
+          k8s.container.startup_duration:
+            enabled: true
+
+    exporters:
+      debug:
+        verbosity: detailed
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      telemetry:
+        logs:
+          level: debug
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [k8s_cluster]
+          exporters: [debug]
+---
+## Collector Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelcol-startup-test
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otelcol-startup-test
+  template:
+    metadata:
+      labels:
+        app: otelcol-startup-test
+    spec:
+      serviceAccountName: otelcol-startup-test
+      containers:
+        - name: otelcol
+          image: otelcontribcol:latest
+          imagePullPolicy: Never
+          command: ["/otelcontribcol", "--config=/conf/relay.yaml"]
+          ports:
+            - containerPort: 13133
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 3
+          resources:
+            limits:
+              cpu: 128m
+              memory: 256Mi
+          volumeMounts:
+            - mountPath: /conf
+              name: config
+      volumes:
+        - name: config
+          configMap:
+            name: otelcol-startup-test-config
+            items:
+              - key: relay.yaml
+                path: relay.yaml
+---
+## A test workload — simple nginx deployment to generate startup metrics
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: startup-test-workload
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: startup-test-workload
+  template:
+    metadata:
+      labels:
+        app: startup-test-workload
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
