@@ -1969,6 +1969,156 @@ func newMetricK8sPodStartupDuration(cfg MetricConfig) metricK8sPodStartupDuratio
 	return m
 }
 
+type metricK8sPodSchedulingDuration struct {
+	data     pmetric.Metric // data buffer for generated metric.
+	config   MetricConfig   // metric config provided by user.
+	capacity int            // max observed number of data points added to the metric.
+}
+
+// init fills k8s.pod.scheduling_duration metric with initial data.
+func (m *metricK8sPodSchedulingDuration) init() {
+	m.data.SetName("k8s.pod.scheduling_duration")
+	m.data.SetDescription("The time in seconds from pod creation to the pod being scheduled to a node (PodScheduled condition). Only reported once the PodScheduled condition is True.")
+	m.data.SetUnit("s")
+	m.data.SetEmptyGauge()
+}
+
+func (m *metricK8sPodSchedulingDuration) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val float64) {
+	if !m.config.Enabled {
+		return
+	}
+	dp := m.data.Gauge().DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	dp.SetDoubleValue(val)
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricK8sPodSchedulingDuration) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricK8sPodSchedulingDuration) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricK8sPodSchedulingDuration(cfg MetricConfig) metricK8sPodSchedulingDuration {
+	m := metricK8sPodSchedulingDuration{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
+type metricK8sPodInitializingDuration struct {
+	data     pmetric.Metric // data buffer for generated metric.
+	config   MetricConfig   // metric config provided by user.
+	capacity int            // max observed number of data points added to the metric.
+}
+
+// init fills k8s.pod.initializing_duration metric with initial data.
+func (m *metricK8sPodInitializingDuration) init() {
+	m.data.SetName("k8s.pod.initializing_duration")
+	m.data.SetDescription("The time in seconds from pod being scheduled to all init containers completing (Initialized condition). Only reported once both PodScheduled and Initialized conditions are True.")
+	m.data.SetUnit("s")
+	m.data.SetEmptyGauge()
+}
+
+func (m *metricK8sPodInitializingDuration) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val float64) {
+	if !m.config.Enabled {
+		return
+	}
+	dp := m.data.Gauge().DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	dp.SetDoubleValue(val)
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricK8sPodInitializingDuration) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricK8sPodInitializingDuration) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricK8sPodInitializingDuration(cfg MetricConfig) metricK8sPodInitializingDuration {
+	m := metricK8sPodInitializingDuration{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
+type metricK8sPodContainersReadyDuration struct {
+	data     pmetric.Metric // data buffer for generated metric.
+	config   MetricConfig   // metric config provided by user.
+	capacity int            // max observed number of data points added to the metric.
+}
+
+// init fills k8s.pod.containers_ready_duration metric with initial data.
+func (m *metricK8sPodContainersReadyDuration) init() {
+	m.data.SetName("k8s.pod.containers_ready_duration")
+	m.data.SetDescription("The time in seconds from init containers completing to all containers being ready (ContainersReady condition). Only reported once both Initialized and ContainersReady conditions are True.")
+	m.data.SetUnit("s")
+	m.data.SetEmptyGauge()
+}
+
+func (m *metricK8sPodContainersReadyDuration) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val float64) {
+	if !m.config.Enabled {
+		return
+	}
+	dp := m.data.Gauge().DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	dp.SetDoubleValue(val)
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricK8sPodContainersReadyDuration) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricK8sPodContainersReadyDuration) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricK8sPodContainersReadyDuration(cfg MetricConfig) metricK8sPodContainersReadyDuration {
+	m := metricK8sPodContainersReadyDuration{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
 type metricK8sPodStatusReason struct {
 	data     pmetric.Metric // data buffer for generated metric.
 	config   MetricConfig   // metric config provided by user.
@@ -2879,6 +3029,9 @@ type MetricsBuilder struct {
 	metricK8sNodeCondition                    metricK8sNodeCondition
 	metricK8sPodPhase                         metricK8sPodPhase
 	metricK8sPodStartupDuration               metricK8sPodStartupDuration
+	metricK8sPodSchedulingDuration            metricK8sPodSchedulingDuration
+	metricK8sPodInitializingDuration          metricK8sPodInitializingDuration
+	metricK8sPodContainersReadyDuration       metricK8sPodContainersReadyDuration
 	metricK8sPodStatusReason                  metricK8sPodStatusReason
 	metricK8sReplicasetAvailable              metricK8sReplicasetAvailable
 	metricK8sReplicasetDesired                metricK8sReplicasetDesired
@@ -2953,6 +3106,9 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 		metricK8sNodeCondition:                    newMetricK8sNodeCondition(mbc.Metrics.K8sNodeCondition),
 		metricK8sPodPhase:                         newMetricK8sPodPhase(mbc.Metrics.K8sPodPhase),
 		metricK8sPodStartupDuration:               newMetricK8sPodStartupDuration(mbc.Metrics.K8sPodStartupDuration),
+		metricK8sPodSchedulingDuration:            newMetricK8sPodSchedulingDuration(mbc.Metrics.K8sPodSchedulingDuration),
+		metricK8sPodInitializingDuration:          newMetricK8sPodInitializingDuration(mbc.Metrics.K8sPodInitializingDuration),
+		metricK8sPodContainersReadyDuration:       newMetricK8sPodContainersReadyDuration(mbc.Metrics.K8sPodContainersReadyDuration),
 		metricK8sPodStatusReason:                  newMetricK8sPodStatusReason(mbc.Metrics.K8sPodStatusReason),
 		metricK8sReplicasetAvailable:              newMetricK8sReplicasetAvailable(mbc.Metrics.K8sReplicasetAvailable),
 		metricK8sReplicasetDesired:                newMetricK8sReplicasetDesired(mbc.Metrics.K8sReplicasetDesired),
@@ -3345,6 +3501,9 @@ func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	mb.metricK8sNodeCondition.emit(ils.Metrics())
 	mb.metricK8sPodPhase.emit(ils.Metrics())
 	mb.metricK8sPodStartupDuration.emit(ils.Metrics())
+	mb.metricK8sPodSchedulingDuration.emit(ils.Metrics())
+	mb.metricK8sPodInitializingDuration.emit(ils.Metrics())
+	mb.metricK8sPodContainersReadyDuration.emit(ils.Metrics())
 	mb.metricK8sPodStatusReason.emit(ils.Metrics())
 	mb.metricK8sReplicasetAvailable.emit(ils.Metrics())
 	mb.metricK8sReplicasetDesired.emit(ils.Metrics())
@@ -3551,6 +3710,21 @@ func (mb *MetricsBuilder) RecordK8sPodPhaseDataPoint(ts pcommon.Timestamp, val i
 // RecordK8sPodStartupDurationDataPoint adds a data point to k8s.pod.startup_duration metric.
 func (mb *MetricsBuilder) RecordK8sPodStartupDurationDataPoint(ts pcommon.Timestamp, val float64) {
 	mb.metricK8sPodStartupDuration.recordDataPoint(mb.startTime, ts, val)
+}
+
+// RecordK8sPodSchedulingDurationDataPoint adds a data point to k8s.pod.scheduling_duration metric.
+func (mb *MetricsBuilder) RecordK8sPodSchedulingDurationDataPoint(ts pcommon.Timestamp, val float64) {
+	mb.metricK8sPodSchedulingDuration.recordDataPoint(mb.startTime, ts, val)
+}
+
+// RecordK8sPodInitializingDurationDataPoint adds a data point to k8s.pod.initializing_duration metric.
+func (mb *MetricsBuilder) RecordK8sPodInitializingDurationDataPoint(ts pcommon.Timestamp, val float64) {
+	mb.metricK8sPodInitializingDuration.recordDataPoint(mb.startTime, ts, val)
+}
+
+// RecordK8sPodContainersReadyDurationDataPoint adds a data point to k8s.pod.containers_ready_duration metric.
+func (mb *MetricsBuilder) RecordK8sPodContainersReadyDurationDataPoint(ts pcommon.Timestamp, val float64) {
+	mb.metricK8sPodContainersReadyDuration.recordDataPoint(mb.startTime, ts, val)
 }
 
 // RecordK8sPodStatusReasonDataPoint adds a data point to k8s.pod.status_reason metric.

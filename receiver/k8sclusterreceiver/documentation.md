@@ -446,6 +446,30 @@ The time in seconds from pod creation to the pod being marked as Ready by the ku
 | ---- | ----------- | ---------- | --------- |
 | s | Gauge | Double | Development |
 
+### k8s.pod.scheduling_duration
+
+The time in seconds from pod creation to the pod being scheduled to a node (PodScheduled condition). Only reported once the PodScheduled condition is True.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | Development |
+
+### k8s.pod.initializing_duration
+
+The time in seconds from pod being scheduled to all init containers completing (Initialized condition). Only reported once both PodScheduled and Initialized conditions are True.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | Development |
+
+### k8s.pod.containers_ready_duration
+
+The time in seconds from init containers completing to all containers being ready (ContainersReady condition). Only reported once both Initialized and ContainersReady conditions are True.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | Development |
+
 ### k8s.pod.status_reason
 
 Current status reason of the pod (1 - Evicted, 2 - NodeAffinity, 3 - NodeLost, 4 - Shutdown, 5 - UnexpectedAdmissionError, 6 - Unknown)

@@ -93,6 +93,12 @@ $defs:
         $ref: metric_config
       k8s.pod.startup_duration:
         $ref: metric_config
+      k8s.pod.scheduling_duration:
+        $ref: metric_config
+      k8s.pod.initializing_duration:
+        $ref: metric_config
+      k8s.pod.containers_ready_duration:
+        $ref: metric_config
       k8s.pod.status_reason:
         $ref: metric_config
       k8s.replicaset.available:

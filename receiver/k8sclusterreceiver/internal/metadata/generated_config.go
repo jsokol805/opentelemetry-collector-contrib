@@ -61,6 +61,9 @@ type MetricsConfig struct {
 	K8sNodeCondition                    MetricConfig `mapstructure:"k8s.node.condition"`
 	K8sPodPhase                         MetricConfig `mapstructure:"k8s.pod.phase"`
 	K8sPodStartupDuration               MetricConfig `mapstructure:"k8s.pod.startup_duration"`
+	K8sPodSchedulingDuration            MetricConfig `mapstructure:"k8s.pod.scheduling_duration"`
+	K8sPodInitializingDuration          MetricConfig `mapstructure:"k8s.pod.initializing_duration"`
+	K8sPodContainersReadyDuration       MetricConfig `mapstructure:"k8s.pod.containers_ready_duration"`
 	K8sPodStatusReason                  MetricConfig `mapstructure:"k8s.pod.status_reason"`
 	K8sReplicasetAvailable              MetricConfig `mapstructure:"k8s.replicaset.available"`
 	K8sReplicasetDesired                MetricConfig `mapstructure:"k8s.replicaset.desired"`
@@ -176,6 +179,15 @@ func DefaultMetricsConfig() MetricsConfig {
 			Enabled: true,
 		},
 		K8sPodStartupDuration: MetricConfig{
+			Enabled: false,
+		},
+		K8sPodSchedulingDuration: MetricConfig{
+			Enabled: false,
+		},
+		K8sPodInitializingDuration: MetricConfig{
+			Enabled: false,
+		},
+		K8sPodContainersReadyDuration: MetricConfig{
 			Enabled: false,
 		},
 		K8sPodStatusReason: MetricConfig{

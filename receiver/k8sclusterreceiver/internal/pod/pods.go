@@ -77,9 +77,7 @@ func Transform(pod *corev1.Pod) *corev1.Pod {
 func RecordMetrics(logger *zap.Logger, mb *metadata.MetricsBuilder, pod *corev1.Pod, ts pcommon.Timestamp) {
 	mb.RecordK8sPodPhaseDataPoint(ts, int64(phaseToInt(pod.Status.Phase)))
 	mb.RecordK8sPodStatusReasonDataPoint(ts, int64(reasonToInt(pod.Status.Reason)))
-	if startupDuration, ok := podStartupDuration(pod); ok {
-		mb.RecordK8sPodStartupDurationDataPoint(ts, startupDuration)
-	}
+	recordPodLifecycleDurations(mb, pod, ts)
 	rb := mb.NewResourceBuilder()
 	rb.SetK8sNamespaceName(pod.Namespace)
 	rb.SetK8sNodeName(pod.Spec.NodeName)
@@ -94,23 +92,64 @@ func RecordMetrics(logger *zap.Logger, mb *metadata.MetricsBuilder, pod *corev1.
 	}
 }
 
-// podStartupDuration computes the time in seconds from pod creation to the Ready
-// condition becoming True. Returns the duration and true if the pod has a Ready
-// condition with status True and a valid creation timestamp; otherwise returns 0, false.
-func podStartupDuration(pod *corev1.Pod) (float64, bool) {
-	if pod.CreationTimestamp.IsZero() {
-		return 0, false
-	}
+// conditionTime returns the LastTransitionTime for the given condition type
+// if the condition is True and the transition time is set.
+func conditionTime(pod *corev1.Pod, condType corev1.PodConditionType) (time.Time, bool) {
 	for _, c := range pod.Status.Conditions {
-		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue && !c.LastTransitionTime.IsZero() {
-			duration := c.LastTransitionTime.Time.Sub(pod.CreationTimestamp.Time).Seconds()
-			if duration >= 0 {
-				return duration, true
-			}
-			return 0, false
+		if c.Type == condType && c.Status == corev1.ConditionTrue && !c.LastTransitionTime.IsZero() {
+			return c.LastTransitionTime.Time, true
 		}
 	}
+	return time.Time{}, false
+}
+
+// phaseDuration computes the duration in seconds between two times.
+// Returns the duration and true only if the result is non-negative.
+func phaseDuration(from, to time.Time) (float64, bool) {
+	d := to.Sub(from).Seconds()
+	if d >= 0 {
+		return d, true
+	}
 	return 0, false
+}
+
+// recordPodLifecycleDurations records pod startup phase duration metrics
+// based on Kubernetes pod condition timestamps:
+//   - startup_duration: CreationTimestamp → Ready
+//   - scheduling_duration: CreationTimestamp → PodScheduled
+//   - initializing_duration: PodScheduled → Initialized
+//   - containers_ready_duration: Initialized → ContainersReady
+func recordPodLifecycleDurations(mb *metadata.MetricsBuilder, pod *corev1.Pod, ts pcommon.Timestamp) {
+	if pod.CreationTimestamp.IsZero() {
+		return
+	}
+	created := pod.CreationTimestamp.Time
+
+	readyTime, readyOK := conditionTime(pod, corev1.PodReady)
+	scheduledTime, scheduledOK := conditionTime(pod, corev1.PodScheduled)
+	initializedTime, initializedOK := conditionTime(pod, corev1.PodInitialized)
+	containersReadyTime, containersReadyOK := conditionTime(pod, corev1.ContainersReady)
+
+	if readyOK {
+		if d, ok := phaseDuration(created, readyTime); ok {
+			mb.RecordK8sPodStartupDurationDataPoint(ts, d)
+		}
+	}
+	if scheduledOK {
+		if d, ok := phaseDuration(created, scheduledTime); ok {
+			mb.RecordK8sPodSchedulingDurationDataPoint(ts, d)
+		}
+	}
+	if scheduledOK && initializedOK {
+		if d, ok := phaseDuration(scheduledTime, initializedTime); ok {
+			mb.RecordK8sPodInitializingDurationDataPoint(ts, d)
+		}
+	}
+	if initializedOK && containersReadyOK {
+		if d, ok := phaseDuration(initializedTime, containersReadyTime); ok {
+			mb.RecordK8sPodContainersReadyDurationDataPoint(ts, d)
+		}
+	}
 }
 
 func reasonToInt(reason string) int32 {

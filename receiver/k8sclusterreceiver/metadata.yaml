@@ -767,6 +767,30 @@ metrics:
     gauge:
       value_type: double
     entity: k8s.pod
+  k8s.pod.scheduling_duration:
+    enabled: false
+    description: The time in seconds from pod creation to the pod being scheduled to a node (PodScheduled condition). Only reported once the PodScheduled condition is True.
+    unit: "s"
+    stability: development
+    gauge:
+      value_type: double
+    entity: k8s.pod
+  k8s.pod.initializing_duration:
+    enabled: false
+    description: The time in seconds from pod being scheduled to all init containers completing (Initialized condition). Only reported once both PodScheduled and Initialized conditions are True.
+    unit: "s"
+    stability: development
+    gauge:
+      value_type: double
+    entity: k8s.pod
+  k8s.pod.containers_ready_duration:
+    enabled: false
+    description: The time in seconds from init containers completing to all containers being ready (ContainersReady condition). Only reported once both Initialized and ContainersReady conditions are True.
+    unit: "s"
+    stability: development
+    gauge:
+      value_type: double
+    entity: k8s.pod
 
   k8s.replicaset.available:
     enabled: true

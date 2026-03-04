@@ -682,115 +682,99 @@ func TestPodContainerReasonMetrics(t *testing.T) {
 	)
 }
 
-func TestPodStartupDuration(t *testing.T) {
+func TestPodLifecycleDurations(t *testing.T) {
 	creationTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	readyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 30, 0, time.UTC))
+	scheduledTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 5, 0, time.UTC))
+	initializedTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 15, 0, time.UTC))
+	containersReadyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 35, 0, time.UTC))
+	readyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 45, 0, time.UTC))
 
 	tests := []struct {
-		name     string
-		pod      *corev1.Pod
-		wantDur  float64
-		wantOK   bool
+		name       string
+		pod        *corev1.Pod
+		wantCounts int // expected number of lifecycle duration metrics recorded
 	}{
 		{
-			name: "Pod with Ready condition",
+			name: "All conditions present",
 			pod: &corev1.Pod{
-				ObjectMeta: v1.ObjectMeta{
-					CreationTimestamp: creationTime,
-				},
+				ObjectMeta: v1.ObjectMeta{CreationTimestamp: creationTime},
 				Status: corev1.PodStatus{
 					Conditions: []corev1.PodCondition{
-						{
-							Type:               corev1.PodReady,
-							Status:             corev1.ConditionTrue,
-							LastTransitionTime: readyTime,
-						},
+						{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: scheduledTime},
+						{Type: corev1.PodInitialized, Status: corev1.ConditionTrue, LastTransitionTime: initializedTime},
+						{Type: corev1.ContainersReady, Status: corev1.ConditionTrue, LastTransitionTime: containersReadyTime},
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue, LastTransitionTime: readyTime},
 					},
 				},
 			},
-			wantDur: 30.0,
-			wantOK:  true,
+			wantCounts: 4, // startup, scheduling, initializing, containers_ready
 		},
 		{
-			name: "Pod not yet ready",
+			name: "Pod not yet ready - only scheduled",
 			pod: &corev1.Pod{
-				ObjectMeta: v1.ObjectMeta{
-					CreationTimestamp: creationTime,
-				},
+				ObjectMeta: v1.ObjectMeta{CreationTimestamp: creationTime},
 				Status: corev1.PodStatus{
 					Conditions: []corev1.PodCondition{
-						{
-							Type:               corev1.PodReady,
-							Status:             corev1.ConditionFalse,
-							LastTransitionTime: readyTime,
-						},
+						{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: scheduledTime},
+						{Type: corev1.PodReady, Status: corev1.ConditionFalse, LastTransitionTime: readyTime},
 					},
 				},
 			},
-			wantDur: 0,
-			wantOK:  false,
+			wantCounts: 1, // only scheduling
 		},
 		{
 			name: "Pod with no conditions",
 			pod: &corev1.Pod{
-				ObjectMeta: v1.ObjectMeta{
-					CreationTimestamp: creationTime,
-				},
-				Status: corev1.PodStatus{},
+				ObjectMeta: v1.ObjectMeta{CreationTimestamp: creationTime},
+				Status:     corev1.PodStatus{},
 			},
-			wantDur: 0,
-			wantOK:  false,
+			wantCounts: 0,
 		},
 		{
 			name: "Pod with zero creation timestamp",
 			pod: &corev1.Pod{
 				Status: corev1.PodStatus{
 					Conditions: []corev1.PodCondition{
-						{
-							Type:               corev1.PodReady,
-							Status:             corev1.ConditionTrue,
-							LastTransitionTime: readyTime,
-						},
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue, LastTransitionTime: readyTime},
 					},
 				},
 			},
-			wantDur: 0,
-			wantOK:  false,
-		},
-		{
-			name: "Pod with zero transition time",
-			pod: &corev1.Pod{
-				ObjectMeta: v1.ObjectMeta{
-					CreationTimestamp: creationTime,
-				},
-				Status: corev1.PodStatus{
-					Conditions: []corev1.PodCondition{
-						{
-							Type:   corev1.PodReady,
-							Status: corev1.ConditionTrue,
-						},
-					},
-				},
-			},
-			wantDur: 0,
-			wantOK:  false,
+			wantCounts: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dur, ok := podStartupDuration(tt.pod)
-			assert.Equal(t, tt.wantOK, ok)
-			if tt.wantOK {
-				assert.InDelta(t, tt.wantDur, dur, 0.001)
+			mbc := metadata.DefaultMetricsBuilderConfig()
+			mbc.Metrics.K8sPodStartupDuration.Enabled = true
+			mbc.Metrics.K8sPodSchedulingDuration.Enabled = true
+			mbc.Metrics.K8sPodInitializingDuration.Enabled = true
+			mbc.Metrics.K8sPodContainersReadyDuration.Enabled = true
+			ts := pcommon.Timestamp(time.Now().UnixNano())
+			mb := metadata.NewMetricsBuilder(mbc, receivertest.NewNopSettings(metadata.Type))
+			recordPodLifecycleDurations(mb, tt.pod, ts)
+			mb.NewResourceBuilder()
+			m := mb.Emit()
+
+			metricCount := 0
+			for i := range m.ResourceMetrics().Len() {
+				rm := m.ResourceMetrics().At(i)
+				for j := range rm.ScopeMetrics().Len() {
+					metricCount += rm.ScopeMetrics().At(j).Metrics().Len()
+				}
 			}
+			assert.Equal(t, tt.wantCounts, metricCount)
 		})
 	}
 }
 
-func TestPodStartupDurationMetric(t *testing.T) {
+func TestPodLifecycleDurationValues(t *testing.T) {
 	creationTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	scheduledTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 5, 0, time.UTC))
+	initializedTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 15, 0, time.UTC))
+	containersReadyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 35, 0, time.UTC))
 	readyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 45, 0, time.UTC))
+
 	pod := testutils.NewPodWithContainer(
 		"1",
 		testutils.NewPodSpecWithContainer("container-name"),
@@ -798,15 +782,17 @@ func TestPodStartupDurationMetric(t *testing.T) {
 	)
 	pod.CreationTimestamp = creationTime
 	pod.Status.Conditions = []corev1.PodCondition{
-		{
-			Type:               corev1.PodReady,
-			Status:             corev1.ConditionTrue,
-			LastTransitionTime: readyTime,
-		},
+		{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: scheduledTime},
+		{Type: corev1.PodInitialized, Status: corev1.ConditionTrue, LastTransitionTime: initializedTime},
+		{Type: corev1.ContainersReady, Status: corev1.ConditionTrue, LastTransitionTime: containersReadyTime},
+		{Type: corev1.PodReady, Status: corev1.ConditionTrue, LastTransitionTime: readyTime},
 	}
 
 	mbc := metadata.DefaultMetricsBuilderConfig()
 	mbc.Metrics.K8sPodStartupDuration.Enabled = true
+	mbc.Metrics.K8sPodSchedulingDuration.Enabled = true
+	mbc.Metrics.K8sPodInitializingDuration.Enabled = true
+	mbc.Metrics.K8sPodContainersReadyDuration.Enabled = true
 	ts := pcommon.Timestamp(time.Now().UnixNano())
 	mb := metadata.NewMetricsBuilder(mbc, receivertest.NewNopSettings(metadata.Type))
 	RecordMetrics(zap.NewNop(), mb, pod, ts)

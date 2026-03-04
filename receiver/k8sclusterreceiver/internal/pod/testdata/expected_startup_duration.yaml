@@ -28,6 +28,24 @@ resourceMetrics:
                 - asDouble: 45
             name: k8s.pod.startup_duration
             unit: s
+          - description: The time in seconds from pod creation to the pod being scheduled to a node (PodScheduled condition). Only reported once the PodScheduled condition is True.
+            gauge:
+              dataPoints:
+                - asDouble: 5
+            name: k8s.pod.scheduling_duration
+            unit: s
+          - description: The time in seconds from pod being scheduled to all init containers completing (Initialized condition). Only reported once both PodScheduled and Initialized conditions are True.
+            gauge:
+              dataPoints:
+                - asDouble: 10
+            name: k8s.pod.initializing_duration
+            unit: s
+          - description: The time in seconds from init containers completing to all containers being ready (ContainersReady condition). Only reported once both Initialized and ContainersReady conditions are True.
+            gauge:
+              dataPoints:
+                - asDouble: 20
+            name: k8s.pod.containers_ready_duration
+            unit: s
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver
           version: latest
