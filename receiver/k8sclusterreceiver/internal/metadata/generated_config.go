@@ -39,6 +39,7 @@ type MetricsConfig struct {
 	K8sContainerRestarts                MetricConfig `mapstructure:"k8s.container.restarts"`
 	K8sContainerStatusReason            MetricConfig `mapstructure:"k8s.container.status.reason"`
 	K8sContainerStatusState             MetricConfig `mapstructure:"k8s.container.status.state"`
+	K8sContainerStartupDuration         MetricConfig `mapstructure:"k8s.container.startup_duration"`
 	K8sContainerStorageLimit            MetricConfig `mapstructure:"k8s.container.storage_limit"`
 	K8sContainerStorageRequest          MetricConfig `mapstructure:"k8s.container.storage_request"`
 	K8sCronjobActiveJobs                MetricConfig `mapstructure:"k8s.cronjob.active_jobs"`
@@ -113,6 +114,9 @@ func DefaultMetricsConfig() MetricsConfig {
 			Enabled: false,
 		},
 		K8sContainerStatusState: MetricConfig{
+			Enabled: false,
+		},
+		K8sContainerStartupDuration: MetricConfig{
 			Enabled: false,
 		},
 		K8sContainerStorageLimit: MetricConfig{

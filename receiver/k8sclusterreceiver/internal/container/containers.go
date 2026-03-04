@@ -98,6 +98,9 @@ func RecordSpecMetrics(logger *zap.Logger, mb *metadata.MetricsBuilder, c corev1
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 1, metadata.AttributeK8sContainerStatusStateRunning)
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 0, metadata.AttributeK8sContainerStatusStateWaiting)
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 0, metadata.AttributeK8sContainerStatusStateTerminated)
+			if d, ok := containerStartupDuration(pod, cs.State.Running.StartedAt.Time); ok {
+				mb.RecordK8sContainerStartupDurationDataPoint(ts, d)
+			}
 		case cs.State.Terminated != nil:
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 0, metadata.AttributeK8sContainerStatusStateRunning)
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 0, metadata.AttributeK8sContainerStatusStateWaiting)
@@ -195,6 +198,25 @@ func boolToInt64(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+// containerStartupDuration computes the time from the pod's Initialized
+// condition to the container's StartedAt timestamp. This approximates the
+// image pull + container start time for the individual container.
+func containerStartupDuration(pod *corev1.Pod, containerStartedAt time.Time) (float64, bool) {
+	if containerStartedAt.IsZero() {
+		return 0, false
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodInitialized && c.Status == corev1.ConditionTrue && !c.LastTransitionTime.IsZero() {
+			d := containerStartedAt.Sub(c.LastTransitionTime.Time).Seconds()
+			if d >= 0 {
+				return d, true
+			}
+			return 0, false
+		}
+	}
+	return 0, false
 }
 
 var re = regexp.MustCompile(`^[\w_-]+://`)

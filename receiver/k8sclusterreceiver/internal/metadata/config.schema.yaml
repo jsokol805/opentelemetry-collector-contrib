@@ -49,6 +49,8 @@ $defs:
         $ref: metric_config
       k8s.container.status.state:
         $ref: metric_config
+      k8s.container.startup_duration:
+        $ref: metric_config
       k8s.container.storage_limit:
         $ref: metric_config
       k8s.container.storage_request:

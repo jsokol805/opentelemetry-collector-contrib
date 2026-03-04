@@ -105,6 +105,9 @@ func TestMetricsBuilder(t *testing.T) {
 			allMetricsCount++
 			mb.RecordK8sContainerStatusStateDataPoint(ts, 1, AttributeK8sContainerStatusStateTerminated)
 
+			allMetricsCount++
+			mb.RecordK8sContainerStartupDurationDataPoint(ts, 1)
+
 			defaultMetricsCount++
 			allMetricsCount++
 			mb.RecordK8sContainerStorageLimitDataPoint(ts, 1)
@@ -463,6 +466,17 @@ func TestMetricsBuilder(t *testing.T) {
 					attrVal, ok := dp.Attributes().Get("k8s.container.status.state")
 					assert.True(t, ok)
 					assert.Equal(t, "terminated", attrVal.Str())
+				case "k8s.container.startup_duration":
+					assert.False(t, validatedMetrics["k8s.container.startup_duration"], "Found a duplicate in the metrics slice: k8s.container.startup_duration")
+					validatedMetrics["k8s.container.startup_duration"] = true
+					assert.Equal(t, pmetric.MetricTypeGauge, ms.At(i).Type())
+					assert.Equal(t, 1, ms.At(i).Gauge().DataPoints().Len())
+					assert.Equal(t, "s", ms.At(i).Unit())
+					dp := ms.At(i).Gauge().DataPoints().At(0)
+					assert.Equal(t, start, dp.StartTimestamp())
+					assert.Equal(t, ts, dp.Timestamp())
+					assert.Equal(t, pmetric.NumberDataPointValueTypeDouble, dp.ValueType())
+					assert.InDelta(t, float64(1), dp.DoubleValue(), 0.001)
 				case "k8s.container.storage_limit":
 					assert.False(t, validatedMetrics["k8s.container.storage_limit"], "Found a duplicate in the metrics slice: k8s.container.storage_limit")
 					validatedMetrics["k8s.container.storage_limit"] = true

@@ -867,6 +867,56 @@ func newMetricK8sContainerStatusState(cfg MetricConfig) metricK8sContainerStatus
 	return m
 }
 
+type metricK8sContainerStartupDuration struct {
+	data     pmetric.Metric // data buffer for generated metric.
+	config   MetricConfig   // metric config provided by user.
+	capacity int            // max observed number of data points added to the metric.
+}
+
+// init fills k8s.container.startup_duration metric with initial data.
+func (m *metricK8sContainerStartupDuration) init() {
+	m.data.SetName("k8s.container.startup_duration")
+	m.data.SetDescription("The time in seconds from the pod's Initialized condition to the container entering the Running state. This approximates image pull plus container startup time. Only reported for containers that are currently running.")
+	m.data.SetUnit("s")
+	m.data.SetEmptyGauge()
+}
+
+func (m *metricK8sContainerStartupDuration) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val float64) {
+	if !m.config.Enabled {
+		return
+	}
+	dp := m.data.Gauge().DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	dp.SetDoubleValue(val)
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricK8sContainerStartupDuration) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricK8sContainerStartupDuration) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricK8sContainerStartupDuration(cfg MetricConfig) metricK8sContainerStartupDuration {
+	m := metricK8sContainerStartupDuration{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
 type metricK8sContainerStorageLimit struct {
 	data     pmetric.Metric // data buffer for generated metric.
 	config   MetricConfig   // metric config provided by user.
@@ -3007,6 +3057,7 @@ type MetricsBuilder struct {
 	metricK8sContainerRestarts                metricK8sContainerRestarts
 	metricK8sContainerStatusReason            metricK8sContainerStatusReason
 	metricK8sContainerStatusState             metricK8sContainerStatusState
+	metricK8sContainerStartupDuration         metricK8sContainerStartupDuration
 	metricK8sContainerStorageLimit            metricK8sContainerStorageLimit
 	metricK8sContainerStorageRequest          metricK8sContainerStorageRequest
 	metricK8sCronjobActiveJobs                metricK8sCronjobActiveJobs
@@ -3084,6 +3135,7 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 		metricK8sContainerRestarts:                newMetricK8sContainerRestarts(mbc.Metrics.K8sContainerRestarts),
 		metricK8sContainerStatusReason:            newMetricK8sContainerStatusReason(mbc.Metrics.K8sContainerStatusReason),
 		metricK8sContainerStatusState:             newMetricK8sContainerStatusState(mbc.Metrics.K8sContainerStatusState),
+		metricK8sContainerStartupDuration:         newMetricK8sContainerStartupDuration(mbc.Metrics.K8sContainerStartupDuration),
 		metricK8sContainerStorageLimit:            newMetricK8sContainerStorageLimit(mbc.Metrics.K8sContainerStorageLimit),
 		metricK8sContainerStorageRequest:          newMetricK8sContainerStorageRequest(mbc.Metrics.K8sContainerStorageRequest),
 		metricK8sCronjobActiveJobs:                newMetricK8sCronjobActiveJobs(mbc.Metrics.K8sCronjobActiveJobs),
@@ -3479,6 +3531,7 @@ func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	mb.metricK8sContainerRestarts.emit(ils.Metrics())
 	mb.metricK8sContainerStatusReason.emit(ils.Metrics())
 	mb.metricK8sContainerStatusState.emit(ils.Metrics())
+	mb.metricK8sContainerStartupDuration.emit(ils.Metrics())
 	mb.metricK8sContainerStorageLimit.emit(ils.Metrics())
 	mb.metricK8sContainerStorageRequest.emit(ils.Metrics())
 	mb.metricK8sCronjobActiveJobs.emit(ils.Metrics())
@@ -3600,6 +3653,11 @@ func (mb *MetricsBuilder) RecordK8sContainerStatusReasonDataPoint(ts pcommon.Tim
 // RecordK8sContainerStatusStateDataPoint adds a data point to k8s.container.status.state metric.
 func (mb *MetricsBuilder) RecordK8sContainerStatusStateDataPoint(ts pcommon.Timestamp, val int64, k8sContainerStatusStateAttributeValue AttributeK8sContainerStatusState) {
 	mb.metricK8sContainerStatusState.recordDataPoint(mb.startTime, ts, val, k8sContainerStatusStateAttributeValue.String())
+}
+
+// RecordK8sContainerStartupDurationDataPoint adds a data point to k8s.container.startup_duration metric.
+func (mb *MetricsBuilder) RecordK8sContainerStartupDurationDataPoint(ts pcommon.Timestamp, val float64) {
+	mb.metricK8sContainerStartupDuration.recordDataPoint(mb.startTime, ts, val)
 }
 
 // RecordK8sContainerStorageLimitDataPoint adds a data point to k8s.container.storage_limit metric.

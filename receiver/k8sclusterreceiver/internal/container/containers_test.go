@@ -15,6 +15,112 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+func TestContainerStartupDuration(t *testing.T) {
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name               string
+		pod                *corev1.Pod
+		containerStartedAt time.Time
+		wantDuration       float64
+		wantOK             bool
+	}{
+		{
+			name: "valid duration",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodInitialized,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: v1.NewTime(baseTime),
+						},
+					},
+				},
+			},
+			containerStartedAt: baseTime.Add(15 * time.Second),
+			wantDuration:       15,
+			wantOK:             true,
+		},
+		{
+			name: "zero container started at",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodInitialized,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: v1.NewTime(baseTime),
+						},
+					},
+				},
+			},
+			containerStartedAt: time.Time{},
+			wantDuration:       0,
+			wantOK:             false,
+		},
+		{
+			name: "no initialized condition",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: v1.NewTime(baseTime),
+						},
+					},
+				},
+			},
+			containerStartedAt: baseTime.Add(15 * time.Second),
+			wantDuration:       0,
+			wantOK:             false,
+		},
+		{
+			name: "initialized condition not true",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodInitialized,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: v1.NewTime(baseTime),
+						},
+					},
+				},
+			},
+			containerStartedAt: baseTime.Add(15 * time.Second),
+			wantDuration:       0,
+			wantOK:             false,
+		},
+		{
+			name: "negative duration",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodInitialized,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: v1.NewTime(baseTime.Add(30 * time.Second)),
+						},
+					},
+				},
+			},
+			containerStartedAt: baseTime,
+			wantDuration:       0,
+			wantOK:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, ok := containerStartupDuration(tt.pod, tt.containerStartedAt)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantDuration, d)
+		})
+	}
+}
+
 func TestGetMetadata(t *testing.T) {
 	refTime := v1.Now()
 	pod := &corev1.Pod{

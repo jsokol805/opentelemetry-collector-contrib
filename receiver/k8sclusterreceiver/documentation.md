@@ -76,6 +76,14 @@ How many times the container has restarted in the recent past. This value is pul
 | ---- | ----------- | ---------- | --------- |
 | {restart} | Gauge | Int | Development |
 
+### k8s.container.startup_duration
+
+The time in seconds from the pod's Initialized condition to the container entering the Running state. This approximates image pull plus container startup time. Only reported for containers that are currently running.
+
+| Unit | Metric Type | Value Type | Stability |
+| ---- | ----------- | ---------- | --------- |
+| s | Gauge | Double | Development |
+
 ### k8s.container.storage_limit
 
 Maximum resource limit set for the container. See https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.23/#resourcerequirements-v1-core for details
