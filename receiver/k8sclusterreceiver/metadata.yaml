@@ -759,6 +759,14 @@ metrics:
     gauge:
       value_type: int
     entity: k8s.pod
+  k8s.pod.startup_duration:
+    enabled: false
+    description: The time in seconds from pod creation to the pod being marked as Ready by the kubelet. Only reported once the pod reaches the Ready condition.
+    unit: "s"
+    stability: development
+    gauge:
+      value_type: double
+    entity: k8s.pod
 
   k8s.replicaset.available:
     enabled: true

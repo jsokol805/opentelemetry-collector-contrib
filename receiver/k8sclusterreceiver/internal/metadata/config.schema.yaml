@@ -91,6 +91,8 @@ $defs:
         $ref: metric_config
       k8s.pod.phase:
         $ref: metric_config
+      k8s.pod.startup_duration:
+        $ref: metric_config
       k8s.pod.status_reason:
         $ref: metric_config
       k8s.replicaset.available:

@@ -189,6 +189,9 @@ func TestMetricsBuilder(t *testing.T) {
 			mb.RecordK8sPodPhaseDataPoint(ts, 1)
 
 			allMetricsCount++
+			mb.RecordK8sPodStartupDurationDataPoint(ts, 1)
+
+			allMetricsCount++
 			mb.RecordK8sPodStatusReasonDataPoint(ts, 1)
 
 			defaultMetricsCount++
@@ -706,6 +709,18 @@ func TestMetricsBuilder(t *testing.T) {
 					assert.Equal(t, ts, dp.Timestamp())
 					assert.Equal(t, pmetric.NumberDataPointValueTypeInt, dp.ValueType())
 					assert.Equal(t, int64(1), dp.IntValue())
+				case "k8s.pod.startup_duration":
+					assert.False(t, validatedMetrics["k8s.pod.startup_duration"], "Found a duplicate in the metrics slice: k8s.pod.startup_duration")
+					validatedMetrics["k8s.pod.startup_duration"] = true
+					assert.Equal(t, pmetric.MetricTypeGauge, ms.At(i).Type())
+					assert.Equal(t, 1, ms.At(i).Gauge().DataPoints().Len())
+					assert.Equal(t, "The time in seconds from pod creation to the pod being marked as Ready by the kubelet. Only reported once the pod reaches the Ready condition.", ms.At(i).Description())
+					assert.Equal(t, "s", ms.At(i).Unit())
+					dp := ms.At(i).Gauge().DataPoints().At(0)
+					assert.Equal(t, start, dp.StartTimestamp())
+					assert.Equal(t, ts, dp.Timestamp())
+					assert.Equal(t, pmetric.NumberDataPointValueTypeDouble, dp.ValueType())
+					assert.InDelta(t, float64(1), dp.DoubleValue(), 0.001)
 				case "k8s.pod.status_reason":
 					assert.False(t, validatedMetrics["k8s.pod.status_reason"], "Found a duplicate in the metrics slice: k8s.pod.status_reason")
 					validatedMetrics["k8s.pod.status_reason"] = true

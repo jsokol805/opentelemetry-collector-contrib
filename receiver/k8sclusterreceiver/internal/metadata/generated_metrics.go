@@ -1919,6 +1919,56 @@ func newMetricK8sPodPhase(cfg MetricConfig) metricK8sPodPhase {
 	return m
 }
 
+type metricK8sPodStartupDuration struct {
+	data     pmetric.Metric // data buffer for generated metric.
+	config   MetricConfig   // metric config provided by user.
+	capacity int            // max observed number of data points added to the metric.
+}
+
+// init fills k8s.pod.startup_duration metric with initial data.
+func (m *metricK8sPodStartupDuration) init() {
+	m.data.SetName("k8s.pod.startup_duration")
+	m.data.SetDescription("The time in seconds from pod creation to the pod being marked as Ready by the kubelet. Only reported once the pod reaches the Ready condition.")
+	m.data.SetUnit("s")
+	m.data.SetEmptyGauge()
+}
+
+func (m *metricK8sPodStartupDuration) recordDataPoint(start pcommon.Timestamp, ts pcommon.Timestamp, val float64) {
+	if !m.config.Enabled {
+		return
+	}
+	dp := m.data.Gauge().DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(ts)
+	dp.SetDoubleValue(val)
+}
+
+// updateCapacity saves max length of data point slices that will be used for the slice capacity.
+func (m *metricK8sPodStartupDuration) updateCapacity() {
+	if m.data.Gauge().DataPoints().Len() > m.capacity {
+		m.capacity = m.data.Gauge().DataPoints().Len()
+	}
+}
+
+// emit appends recorded metric data to a metrics slice and prepares it for recording another set of data points.
+func (m *metricK8sPodStartupDuration) emit(metrics pmetric.MetricSlice) {
+	if m.config.Enabled && m.data.Gauge().DataPoints().Len() > 0 {
+		m.updateCapacity()
+		m.data.MoveTo(metrics.AppendEmpty())
+		m.init()
+	}
+}
+
+func newMetricK8sPodStartupDuration(cfg MetricConfig) metricK8sPodStartupDuration {
+	m := metricK8sPodStartupDuration{config: cfg}
+
+	if cfg.Enabled {
+		m.data = pmetric.NewMetric()
+		m.init()
+	}
+	return m
+}
+
 type metricK8sPodStatusReason struct {
 	data     pmetric.Metric // data buffer for generated metric.
 	config   MetricConfig   // metric config provided by user.
@@ -2828,6 +2878,7 @@ type MetricsBuilder struct {
 	metricK8sNamespacePhase                   metricK8sNamespacePhase
 	metricK8sNodeCondition                    metricK8sNodeCondition
 	metricK8sPodPhase                         metricK8sPodPhase
+	metricK8sPodStartupDuration               metricK8sPodStartupDuration
 	metricK8sPodStatusReason                  metricK8sPodStatusReason
 	metricK8sReplicasetAvailable              metricK8sReplicasetAvailable
 	metricK8sReplicasetDesired                metricK8sReplicasetDesired
@@ -2901,6 +2952,7 @@ func NewMetricsBuilder(mbc MetricsBuilderConfig, settings receiver.Settings, opt
 		metricK8sNamespacePhase:                   newMetricK8sNamespacePhase(mbc.Metrics.K8sNamespacePhase),
 		metricK8sNodeCondition:                    newMetricK8sNodeCondition(mbc.Metrics.K8sNodeCondition),
 		metricK8sPodPhase:                         newMetricK8sPodPhase(mbc.Metrics.K8sPodPhase),
+		metricK8sPodStartupDuration:               newMetricK8sPodStartupDuration(mbc.Metrics.K8sPodStartupDuration),
 		metricK8sPodStatusReason:                  newMetricK8sPodStatusReason(mbc.Metrics.K8sPodStatusReason),
 		metricK8sReplicasetAvailable:              newMetricK8sReplicasetAvailable(mbc.Metrics.K8sReplicasetAvailable),
 		metricK8sReplicasetDesired:                newMetricK8sReplicasetDesired(mbc.Metrics.K8sReplicasetDesired),
@@ -3292,6 +3344,7 @@ func (mb *MetricsBuilder) EmitForResource(options ...ResourceMetricsOption) {
 	mb.metricK8sNamespacePhase.emit(ils.Metrics())
 	mb.metricK8sNodeCondition.emit(ils.Metrics())
 	mb.metricK8sPodPhase.emit(ils.Metrics())
+	mb.metricK8sPodStartupDuration.emit(ils.Metrics())
 	mb.metricK8sPodStatusReason.emit(ils.Metrics())
 	mb.metricK8sReplicasetAvailable.emit(ils.Metrics())
 	mb.metricK8sReplicasetDesired.emit(ils.Metrics())
@@ -3493,6 +3546,11 @@ func (mb *MetricsBuilder) RecordK8sNodeConditionDataPoint(ts pcommon.Timestamp, 
 // RecordK8sPodPhaseDataPoint adds a data point to k8s.pod.phase metric.
 func (mb *MetricsBuilder) RecordK8sPodPhaseDataPoint(ts pcommon.Timestamp, val int64) {
 	mb.metricK8sPodPhase.recordDataPoint(mb.startTime, ts, val)
+}
+
+// RecordK8sPodStartupDurationDataPoint adds a data point to k8s.pod.startup_duration metric.
+func (mb *MetricsBuilder) RecordK8sPodStartupDurationDataPoint(ts pcommon.Timestamp, val float64) {
+	mb.metricK8sPodStartupDuration.recordDataPoint(mb.startTime, ts, val)
 }
 
 // RecordK8sPodStatusReasonDataPoint adds a data point to k8s.pod.status_reason metric.

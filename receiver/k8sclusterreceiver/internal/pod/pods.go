@@ -43,9 +43,10 @@ func Transform(pod *corev1.Pod) *corev1.Pod {
 			NodeName: pod.Spec.NodeName,
 		},
 		Status: corev1.PodStatus{
-			Phase:    pod.Status.Phase,
-			QOSClass: pod.Status.QOSClass,
-			Reason:   pod.Status.Reason,
+			Phase:      pod.Status.Phase,
+			QOSClass:   pod.Status.QOSClass,
+			Reason:     pod.Status.Reason,
+			Conditions: pod.Status.Conditions,
 		},
 	}
 	for i := range pod.Status.ContainerStatuses {
@@ -76,6 +77,9 @@ func Transform(pod *corev1.Pod) *corev1.Pod {
 func RecordMetrics(logger *zap.Logger, mb *metadata.MetricsBuilder, pod *corev1.Pod, ts pcommon.Timestamp) {
 	mb.RecordK8sPodPhaseDataPoint(ts, int64(phaseToInt(pod.Status.Phase)))
 	mb.RecordK8sPodStatusReasonDataPoint(ts, int64(reasonToInt(pod.Status.Reason)))
+	if startupDuration, ok := podStartupDuration(pod); ok {
+		mb.RecordK8sPodStartupDurationDataPoint(ts, startupDuration)
+	}
 	rb := mb.NewResourceBuilder()
 	rb.SetK8sNamespaceName(pod.Namespace)
 	rb.SetK8sNodeName(pod.Spec.NodeName)
@@ -88,6 +92,25 @@ func RecordMetrics(logger *zap.Logger, mb *metadata.MetricsBuilder, pod *corev1.
 		c := pod.Spec.Containers[i]
 		container.RecordSpecMetrics(logger, mb, c, pod, ts)
 	}
+}
+
+// podStartupDuration computes the time in seconds from pod creation to the Ready
+// condition becoming True. Returns the duration and true if the pod has a Ready
+// condition with status True and a valid creation timestamp; otherwise returns 0, false.
+func podStartupDuration(pod *corev1.Pod) (float64, bool) {
+	if pod.CreationTimestamp.IsZero() {
+		return 0, false
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue && !c.LastTransitionTime.IsZero() {
+			duration := c.LastTransitionTime.Time.Sub(pod.CreationTimestamp.Time).Seconds()
+			if duration >= 0 {
+				return duration, true
+			}
+			return 0, false
+		}
+	}
+	return 0, false
 }
 
 func reasonToInt(reason string) int32 {

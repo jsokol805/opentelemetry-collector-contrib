@@ -355,6 +355,13 @@ func podWithOwnerReference(kind string) *corev1.Pod {
 func TestTransform(t *testing.T) {
 	waitingContainerState := corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}
 	runningContainerState := corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: v1.Now()}}
+	podConditions := []corev1.PodCondition{
+		{
+			Type:               corev1.PodReady,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: v1.Now(),
+		},
+	}
 	originalPod := &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "my-pod",
@@ -448,11 +455,12 @@ func TestTransform(t *testing.T) {
 			},
 		},
 		Status: corev1.PodStatus{
-			Phase:     corev1.PodRunning,
-			Reason:    "Evicted",
-			HostIP:    "192.168.1.100",
-			PodIP:     "10.244.0.5",
-			StartTime: &v1.Time{Time: v1.Now().Add(-5 * time.Minute)},
+			Phase:      corev1.PodRunning,
+			Reason:     "Evicted",
+			HostIP:     "192.168.1.100",
+			PodIP:      "10.244.0.5",
+			StartTime:  &v1.Time{Time: v1.Now().Add(-5 * time.Minute)},
+			Conditions: podConditions,
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
 					Name:         "my-failing-container",
@@ -513,8 +521,9 @@ func TestTransform(t *testing.T) {
 			},
 		},
 		Status: corev1.PodStatus{
-			Phase:  corev1.PodRunning,
-			Reason: "Evicted",
+			Phase:      corev1.PodRunning,
+			Reason:     "Evicted",
+			Conditions: podConditions,
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
 					Name:         "my-failing-container",
@@ -662,6 +671,148 @@ func TestPodContainerReasonMetrics(t *testing.T) {
 	m := mb.Emit()
 
 	expected, err := golden.ReadMetrics(filepath.Join("testdata", "expected_container_reason.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, pmetrictest.CompareMetrics(expected, m,
+		pmetrictest.IgnoreTimestamp(),
+		pmetrictest.IgnoreStartTimestamp(),
+		pmetrictest.IgnoreResourceMetricsOrder(),
+		pmetrictest.IgnoreMetricsOrder(),
+		pmetrictest.IgnoreScopeMetricsOrder(),
+	),
+	)
+}
+
+func TestPodStartupDuration(t *testing.T) {
+	creationTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	readyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 30, 0, time.UTC))
+
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		wantDur  float64
+		wantOK   bool
+	}{
+		{
+			name: "Pod with Ready condition",
+			pod: &corev1.Pod{
+				ObjectMeta: v1.ObjectMeta{
+					CreationTimestamp: creationTime,
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: readyTime,
+						},
+					},
+				},
+			},
+			wantDur: 30.0,
+			wantOK:  true,
+		},
+		{
+			name: "Pod not yet ready",
+			pod: &corev1.Pod{
+				ObjectMeta: v1.ObjectMeta{
+					CreationTimestamp: creationTime,
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionFalse,
+							LastTransitionTime: readyTime,
+						},
+					},
+				},
+			},
+			wantDur: 0,
+			wantOK:  false,
+		},
+		{
+			name: "Pod with no conditions",
+			pod: &corev1.Pod{
+				ObjectMeta: v1.ObjectMeta{
+					CreationTimestamp: creationTime,
+				},
+				Status: corev1.PodStatus{},
+			},
+			wantDur: 0,
+			wantOK:  false,
+		},
+		{
+			name: "Pod with zero creation timestamp",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: readyTime,
+						},
+					},
+				},
+			},
+			wantDur: 0,
+			wantOK:  false,
+		},
+		{
+			name: "Pod with zero transition time",
+			pod: &corev1.Pod{
+				ObjectMeta: v1.ObjectMeta{
+					CreationTimestamp: creationTime,
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+			wantDur: 0,
+			wantOK:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dur, ok := podStartupDuration(tt.pod)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.InDelta(t, tt.wantDur, dur, 0.001)
+			}
+		})
+	}
+}
+
+func TestPodStartupDurationMetric(t *testing.T) {
+	creationTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	readyTime := v1.NewTime(time.Date(2024, 1, 1, 0, 0, 45, 0, time.UTC))
+	pod := testutils.NewPodWithContainer(
+		"1",
+		testutils.NewPodSpecWithContainer("container-name"),
+		testutils.NewPodStatusWithContainer("container-name", containerIDWithPrefix("container-id")),
+	)
+	pod.CreationTimestamp = creationTime
+	pod.Status.Conditions = []corev1.PodCondition{
+		{
+			Type:               corev1.PodReady,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: readyTime,
+		},
+	}
+
+	mbc := metadata.DefaultMetricsBuilderConfig()
+	mbc.Metrics.K8sPodStartupDuration.Enabled = true
+	ts := pcommon.Timestamp(time.Now().UnixNano())
+	mb := metadata.NewMetricsBuilder(mbc, receivertest.NewNopSettings(metadata.Type))
+	RecordMetrics(zap.NewNop(), mb, pod, ts)
+	m := mb.Emit()
+
+	expected, err := golden.ReadMetrics(filepath.Join("testdata", "expected_startup_duration.yaml"))
 	require.NoError(t, err)
 	require.NoError(t, pmetrictest.CompareMetrics(expected, m,
 		pmetrictest.IgnoreTimestamp(),
