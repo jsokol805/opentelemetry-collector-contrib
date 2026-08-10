@@ -1,0 +1,48 @@
+display_name: Completeness Exporter
+type: completeness
+
+description: |
+  The Completeness Exporter wraps another logs exporter and counts the log records that exporter
+  confirmed as delivered, grouped by the pipeline ingestion time bucket carried by each record.
+  It takes the sending queue over from the exporter it wraps, so that the count is taken after the
+  queue, at the point where the data was really handed to the backend. Combined with a count of the
+  records that entered the pipeline, it measures the data completeness of a pipeline segment.
+
+status:
+  class: exporter
+  stability:
+    development: [logs]
+  distributions: []
+  codeowners:
+    active: [jsokol805]
+
+tests:
+  config:
+    segment: test-collector
+    exporter:
+      type: nop
+  # The lifecycle test starts the component against a host that has no component
+  # factories, so the wrapped exporter cannot be created. Starting and stopping
+  # is covered by the tests of this package instead.
+  skip_lifecycle: true
+
+attributes:
+  bucket:
+    description: The pipeline ingestion time bucket that was attached to the log records when they entered the pipeline.
+    type: string
+  segment:
+    description: Identifier of the pipeline segment reporting the acknowledgment.
+    type: string
+
+telemetry:
+  metrics:
+    completeness_acks:
+      prefix: otel_
+      enabled: true
+      description: Number of log records the wrapped exporter confirmed as delivered, grouped by pipeline ingestion time bucket.
+      stability: development
+      unit: "{records}"
+      attributes: [bucket, segment]
+      sum:
+        value_type: int
+        monotonic: true

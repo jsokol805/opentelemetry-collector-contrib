@@ -1,0 +1,29 @@
+completeness:
+  segment: daemonset-collector
+  exporter:
+    type: otlp
+    config:
+      endpoint: central-collector:4317
+
+completeness/full:
+  segment: central-collector
+  bucket_attribute: my.custom.bucket
+  sending_queue:
+    queue_size: 5000
+  exporter:
+    type: clickhouse
+    config:
+      endpoint: tcp://clickhouse:9000
+
+completeness/missing_segment:
+  exporter:
+    type: otlp
+
+completeness/missing_exporter:
+  segment: central-collector
+
+completeness/empty_bucket_attribute:
+  segment: central-collector
+  bucket_attribute: ""
+  exporter:
+    type: otlp

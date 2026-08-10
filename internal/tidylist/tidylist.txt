@@ -99,6 +99,7 @@ exporter/azuremonitorexporter
 exporter/bmchelixexporter
 exporter/cassandraexporter
 exporter/clickhouseexporter
+exporter/completenessexporter
 exporter/coralogixexporter
 pkg/winperfcounters
 receiver/hostmetricsreceiver

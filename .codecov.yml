@@ -153,6 +153,10 @@ component_management:
     name: exporter_clickhouse
     paths:
     - exporter/clickhouseexporter/**
+  - component_id: exporter_completeness
+    name: exporter_completeness
+    paths:
+    - exporter/completenessexporter/**
   - component_id: exporter_coralogix
     name: exporter_coralogix
     paths:

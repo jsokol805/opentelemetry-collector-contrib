@@ -42,6 +42,7 @@ components:
     - exporter/bmchelix
     - exporter/cassandra
     - exporter/clickhouse
+    - exporter/completeness
     - exporter/coralogix
     - exporter/datadog
     - exporter/dataset

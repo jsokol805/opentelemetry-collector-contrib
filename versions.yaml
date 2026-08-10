@@ -42,6 +42,7 @@ module-sets:
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/bmchelixexporter
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/cassandraexporter
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter
+      - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/completenessexporter
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/coralogixexporter
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter
       - github.com/open-telemetry/opentelemetry-collector-contrib/exporter/datadogexporter/integrationtest

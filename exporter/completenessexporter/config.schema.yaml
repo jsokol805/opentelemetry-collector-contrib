@@ -1,0 +1,29 @@
+$defs:
+  wrapped_exporter:
+    description: WrappedExporter identifies and configures the exporter that does the actual sending.
+    type: object
+    properties:
+      config:
+        description: Config is the configuration of the wrapped exporter, exactly as it would be written under its own key in the `exporters` section. It is validated when the collector starts, because the configuration of a component type that is only known at runtime cannot be checked earlier.
+        type: object
+        additionalProperties:
+          x-customType: any
+      type:
+        description: Type is the component type of the exporter to wrap, for example "otlp" or "clickhouse". It must be part of the collector build.
+        type: string
+description: Config holds the configuration of the completeness exporter.
+type: object
+properties:
+  bucket_attribute:
+    description: BucketAttribute is the name of the log record attribute holding the ingestion time bucket. Records that do not carry the attribute are counted under the "unknown" bucket.
+    type: string
+  exporter:
+    description: Exporter describes the exporter to wrap.
+    $ref: wrapped_exporter
+  segment:
+    description: Segment identifies the pipeline segment this exporter reports for. It is emitted as the "segment" attribute of the acknowledgment metric, and is what makes the metrics of several collectors distinguishable from each other. This setting is required.
+    type: string
+  sending_queue:
+    description: 'QueueConfig is the sending queue of this exporter. It sits in front of the acknowledgment point, which is what keeps the acknowledgments meaningful: the queue of the wrapped exporter is disabled, so records are counted when the backend accepted them and not when they were enqueued.'
+    x-optional: true
+    $ref: go.opentelemetry.io/collector/exporter/exporterhelper.queue_batch_config

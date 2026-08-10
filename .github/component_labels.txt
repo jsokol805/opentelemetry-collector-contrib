@@ -36,6 +36,7 @@ exporter/azuremonitorexporter exporter/azuremonitor
 exporter/bmchelixexporter exporter/bmchelix
 exporter/cassandraexporter exporter/cassandra
 exporter/clickhouseexporter exporter/clickhouse
+exporter/completenessexporter exporter/completeness
 exporter/coralogixexporter exporter/coralogix
 exporter/datadogexporter exporter/datadog
 exporter/datasetexporter exporter/dataset
