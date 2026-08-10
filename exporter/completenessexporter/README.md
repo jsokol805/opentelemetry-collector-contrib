@@ -67,7 +67,7 @@ The result does not depend on how the pipeline is configured: the count follows 
 | `exporter::type`   | *required*                   | Component type of the exporter to wrap, for example `otlp` or `clickhouse`. It must be part of the collector build.             |
 | `exporter::config` | `{}`                         | Configuration of the wrapped exporter, exactly as it would be written under its own key in `exporters`.                         |
 | `bucket_attribute` | `pipeline.ingestion_bucket`  | Attribute holding the ingestion time bucket. Looked up on the log record first, then on the scope, then on the resource.        |
-| `sending_queue`    | standard queue defaults      | The [queue][queue] of this exporter, taken over from the wrapped one. Supports everything `exporterhelper` supports, including a persistent queue. |
+| `sending_queue`    | standard queue defaults, but `block_on_overflow: true` | The [queue][queue] of this exporter, taken over from the wrapped one. Supports everything `exporterhelper` supports, including a persistent queue. |
 
 ```yaml
 exporters:
@@ -125,7 +125,8 @@ The exporter emits two metrics as part of the collector's [internal telemetry][i
   records this exporter gave up on, so that a loss is reported instead of only being missing from the
   acknowledgments. The reasons are `send_failed` (the wrapped exporter failed the whole batch, after
   its own retries), `partially_rejected` (the wrapped exporter named the records it could not send)
-  and `queue_full` (the sending queue of this exporter had no room left).
+  and `queue_full` (the sending queue of this exporter had no room left, which only happens if you
+  turn the [backpressure](#backpressure-instead-of-dropping) off).
 
 The Prometheus exporter of the internal telemetry renders them with a `_total` suffix.
 
@@ -297,6 +298,29 @@ sum by (bucket) (increase(otel_completeness_acks_total{segment="central-collecto
   /
 sum by (bucket) (increase(otel_completeness_creates_total{segment="daemonset-collector"}[1h]))
 ```
+
+### Backpressure instead of dropping
+
+`exporterhelper` queues drop the incoming batch when they are full. That default makes no sense for
+an exporter whose job is to account for every record, so this one sets `block_on_overflow: true`: a
+full queue makes the pipeline wait instead. The receiver stops reading — the `filelog` receiver
+leaves the rest of the file for later, an OTLP receiver holds the request open and its client backs
+off — and nothing is thrown away because the backend was briefly slow.
+
+The wait is bounded by the wrapped exporter: once its `retry_on_failure` gives up on a batch, the
+queue moves on and those records are counted as `send_failed` drops.
+
+Set it back if you would rather shed load than slow the pipeline down:
+
+```yaml
+exporters:
+  completeness:
+    sending_queue:
+      block_on_overflow: false
+```
+
+The refused batches are then counted as `queue_full` drops, so they stay visible in the numbers
+instead of only being missing from the acknowledgments.
 
 ### Surviving a restart
 

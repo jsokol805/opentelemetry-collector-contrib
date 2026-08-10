@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/collector/config/configoptional"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/confmap/xconfmap"
-	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/completenessexporter/internal/metadata"
 )
@@ -21,7 +20,8 @@ import (
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 
-	biggerQueue := exporterhelper.NewDefaultQueueConfig()
+	defaultQueue := createDefaultConfig().(*Config).QueueConfig
+	biggerQueue := *defaultQueue.Get()
 	biggerQueue.QueueSize = 5000
 
 	tests := []struct {
@@ -38,7 +38,7 @@ func TestLoadConfig(t *testing.T) {
 					Type:   "otlp",
 					Config: map[string]any{"endpoint": "central-collector:4317"},
 				},
-				QueueConfig: configoptional.Some(exporterhelper.NewDefaultQueueConfig()),
+				QueueConfig: defaultQueue,
 			},
 		},
 		{
@@ -100,6 +100,7 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
 	assert.Equal(t, defaultBucketAttribute, cfg.BucketAttribute)
 	assert.True(t, cfg.QueueConfig.HasValue(), "the queue this exporter takes over from the wrapped one is on by default")
+	assert.True(t, cfg.QueueConfig.Get().BlockOnOverflow, "a full queue must push back rather than drop records")
 	// Neither the segment nor the exporter to wrap have a meaningful default.
 	assert.Error(t, cfg.Validate())
 }

@@ -33,6 +33,7 @@ const (
 	testSegment = "test-collector"
 	fakeType    = "fake"
 	acksMetric  = "otel_completeness_acks"
+	dropsMetric = "otel_completeness_drops"
 )
 
 func exportertestSettings() exporter.Settings {
@@ -80,7 +81,11 @@ func (f *fakeExporter) receivedConfig() *fakeConfig {
 
 func (f *fakeExporter) push(_ context.Context, ld plog.Logs) error {
 	if f.entered != nil {
-		f.entered <- struct{}{}
+		// Non blocking, so that a test only has to read the first signal.
+		select {
+		case f.entered <- struct{}{}:
+		default:
+		}
 	}
 	if f.release != nil {
 		<-f.release
@@ -474,11 +479,12 @@ func TestPartialFailureAcknowledgesTheDeliveredPart(t *testing.T) {
 // Records the queue refuses never reach the sending path, so they are counted in
 // front of it. Without that they would silently be missing from both metrics.
 func TestDropsWhenTheQueueIsFull(t *testing.T) {
-	fake := &fakeExporter{entered: make(chan struct{}), release: make(chan struct{})}
+	fake := &fakeExporter{entered: make(chan struct{}, 1), release: make(chan struct{})}
 
 	queue := noBatchQueue()
 	queue.QueueSize = 1
 	queue.NumConsumers = 1
+	// Opt out of the blocking default, so that the queue rejects instead of waiting.
 	queue.BlockOnOverflow = false
 
 	cfg := createDefaultConfig().(*Config)
@@ -540,5 +546,63 @@ func TestPersistentQueueDelivers(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	metadatatest.AssertEqualCompletenessAcks(t, tel, []metricdata.DataPoint[int64]{
 		ackDataPoint("2026-08-10T21:22:00Z", 1),
+	}, ignoreVolatile...)
+}
+
+// The default queue pushes back on the pipeline when it is full instead of
+// dropping the batch, which is what a receiver needs to slow down rather than
+// lose data it could still have re-read.
+func TestQueueBlocksWhenFullByDefault(t *testing.T) {
+	fake := &fakeExporter{entered: make(chan struct{}, 1), release: make(chan struct{})}
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.Segment = testSegment
+	cfg.Exporter.Type = fakeType
+	queue := *cfg.QueueConfig.Get()
+	require.True(t, queue.BlockOnOverflow, "the default queue must push back instead of dropping")
+	queue.QueueSize = 1
+	queue.NumConsumers = 1
+	queue.Batch = configoptional.None[exporterhelper.BatchConfig]()
+	cfg.QueueConfig = configoptional.Some(queue)
+
+	exp, tel := newTestExporter(t, cfg, fake)
+
+	// Hold the only consumer inside a send, so that the queue fills up.
+	require.NoError(t, exp.ConsumeLogs(t.Context(), logsWithBuckets("blocked")))
+	<-fake.entered
+
+	const overflowing = 5
+	errs := make(chan error, overflowing)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range overflowing {
+			errs <- exp.ConsumeLogs(context.Background(), logsWithBuckets("blocked")) //nolint:usetesting // the sends outlive the assertions below
+		}
+	}()
+
+	select {
+	case <-done:
+		close(fake.release)
+		t.Fatal("the queue took everything without waiting, it did not push back")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(fake.release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the senders were never let through")
+	}
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err, "a blocking queue must not reject a batch")
+	}
+
+	require.Eventually(t, func() bool { return fake.sendCount() == overflowing+1 }, 5*time.Second, 10*time.Millisecond)
+	_, err := tel.GetMetric(dropsMetric)
+	assert.Error(t, err, "nothing may be dropped when the queue blocks")
+	metadatatest.AssertEqualCompletenessAcks(t, tel, []metricdata.DataPoint[int64]{
+		ackDataPoint("blocked", overflowing+1),
 	}, ignoreVolatile...)
 }

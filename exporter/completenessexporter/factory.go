@@ -25,11 +25,17 @@ func NewFactory() exporter.Factory {
 }
 
 func createDefaultConfig() component.Config {
+	// The wrapped exporter loses its own queue, so this one defaults to the
+	// standard queue settings to keep the pipeline behaving the same way.
+	queue := exporterhelper.NewDefaultQueueConfig()
+	// Except for the overflow behavior: dropping records the moment the backend
+	// cannot keep up defeats the purpose of measuring completeness, so the queue
+	// pushes back on the pipeline instead.
+	queue.BlockOnOverflow = true
+
 	return &Config{
 		BucketAttribute: defaultBucketAttribute,
-		// The wrapped exporter loses its own queue, so this one defaults to the
-		// standard queue settings to keep the pipeline behaving the same way.
-		QueueConfig: configoptional.Some(exporterhelper.NewDefaultQueueConfig()),
+		QueueConfig:     configoptional.Some(queue),
 	}
 }
 
