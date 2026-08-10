@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configoptional"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/exportertest"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/completenessexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/completenessexporter/internal/metadatatest"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/storagetest"
 )
 
 const (
@@ -51,6 +53,11 @@ type fakeExporter struct {
 	cfg      *fakeConfig
 	consumed []plog.Logs
 	err      error
+
+	// entered is signaled when a send starts and release blocks it, both
+	// optional, so that a test can hold a send open.
+	entered chan struct{}
+	release chan struct{}
 }
 
 func (f *fakeExporter) setErr(err error) {
@@ -72,6 +79,12 @@ func (f *fakeExporter) receivedConfig() *fakeConfig {
 }
 
 func (f *fakeExporter) push(_ context.Context, ld plog.Logs) error {
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.release != nil {
+		<-f.release
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.consumed = append(f.consumed, ld)
@@ -102,7 +115,11 @@ type factoryHost struct {
 }
 
 func newFactoryHost(factory exporter.Factory) component.Host {
-	return factoryHost{Host: componenttest.NewNopHost(), factory: factory}
+	return newFactoryHostOn(componenttest.NewNopHost(), factory)
+}
+
+func newFactoryHostOn(base component.Host, factory exporter.Factory) component.Host {
+	return factoryHost{Host: base, factory: factory}
 }
 
 func (h factoryHost) GetFactory(kind component.Kind, componentType component.Type) component.Factory {
@@ -124,12 +141,17 @@ func testConfig() *Config {
 
 func newTestExporter(t *testing.T, cfg *Config, fake *fakeExporter) (exporter.Logs, *componenttest.Telemetry) {
 	t.Helper()
+	return newTestExporterOn(t, cfg, fake, componenttest.NewNopHost())
+}
+
+func newTestExporterOn(t *testing.T, cfg *Config, fake *fakeExporter, base component.Host) (exporter.Logs, *componenttest.Telemetry) {
+	t.Helper()
 	tel := componenttest.NewTelemetry()
 	t.Cleanup(func() { require.NoError(t, tel.Shutdown(context.Background())) }) //nolint:usetesting // the test context is already canceled during cleanup
 
 	exp, err := createLogsExporter(t.Context(), metadatatest.NewSettings(tel), cfg)
 	require.NoError(t, err)
-	require.NoError(t, exp.Start(t.Context(), newFactoryHost(fake.factory())))
+	require.NoError(t, exp.Start(t.Context(), newFactoryHostOn(base, fake.factory())))
 	t.Cleanup(func() { require.NoError(t, exp.Shutdown(context.Background())) }) //nolint:usetesting // the test context is already canceled during cleanup
 	return exp, tel
 }
@@ -167,6 +189,17 @@ func ackDataPoint(bucket string, value int64) metricdata.DataPoint[int64] {
 	}
 }
 
+func dropDataPoint(bucket, reason string, value int64) metricdata.DataPoint[int64] {
+	return metricdata.DataPoint[int64]{
+		Value: value,
+		Attributes: attribute.NewSet(
+			attribute.String(bucketAttrKey, bucket),
+			attribute.String(segmentAttrKey, testSegment),
+			attribute.String(reasonAttrKey, reason),
+		),
+	}
+}
+
 func TestAcksAfterWrappedExporterDelivered(t *testing.T) {
 	fake := &fakeExporter{}
 	exp, tel := newTestExporter(t, testConfig(), fake)
@@ -194,6 +227,11 @@ func TestNoAcksWhenWrappedExporterFails(t *testing.T) {
 
 	_, err := tel.GetMetric(acksMetric)
 	assert.Error(t, err, "no acknowledgment must be recorded for a failed export")
+
+	// The loss is reported instead of only being missing from the acknowledgments.
+	metadatatest.AssertEqualCompletenessDrops(t, tel, []metricdata.DataPoint[int64]{
+		dropDataPoint("2026-08-10T21:22:00Z", reasonSendFailed, 1),
+	}, ignoreVolatile...)
 }
 
 // The point of wrapping the exporter instead of counting in front of it: with a
@@ -405,4 +443,102 @@ func noBatchQueue() exporterhelper.QueueBatchConfig {
 	queue := exporterhelper.NewDefaultQueueConfig()
 	queue.Batch = configoptional.None[exporterhelper.BatchConfig]()
 	return queue
+}
+
+// An exporter that reports which records it could not send lets the delivered
+// part of the batch be acknowledged instead of writing the whole batch off.
+func TestPartialFailureAcknowledgesTheDeliveredPart(t *testing.T) {
+	rejected := logsWithBuckets("2026-08-10T21:22:00Z", "2026-08-10T21:23:00Z")
+	sendErr := consumererror.NewLogs(errors.New("2 of 5 records rejected"), rejected)
+	fake := &fakeExporter{err: sendErr}
+	exp, tel := newTestExporter(t, testConfig(), fake)
+
+	require.Error(t, exp.ConsumeLogs(t.Context(), logsWithBuckets(
+		"2026-08-10T21:22:00Z",
+		"2026-08-10T21:22:00Z",
+		"2026-08-10T21:22:00Z",
+		"2026-08-10T21:23:00Z",
+		"2026-08-10T21:23:00Z",
+	)))
+
+	metadatatest.AssertEqualCompletenessAcks(t, tel, []metricdata.DataPoint[int64]{
+		ackDataPoint("2026-08-10T21:22:00Z", 2),
+		ackDataPoint("2026-08-10T21:23:00Z", 1),
+	}, ignoreVolatile...)
+	metadatatest.AssertEqualCompletenessDrops(t, tel, []metricdata.DataPoint[int64]{
+		dropDataPoint("2026-08-10T21:22:00Z", reasonPartiallyRejected, 1),
+		dropDataPoint("2026-08-10T21:23:00Z", reasonPartiallyRejected, 1),
+	}, ignoreVolatile...)
+}
+
+// Records the queue refuses never reach the sending path, so they are counted in
+// front of it. Without that they would silently be missing from both metrics.
+func TestDropsWhenTheQueueIsFull(t *testing.T) {
+	fake := &fakeExporter{entered: make(chan struct{}), release: make(chan struct{})}
+
+	queue := noBatchQueue()
+	queue.QueueSize = 1
+	queue.NumConsumers = 1
+	queue.BlockOnOverflow = false
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.Segment = testSegment
+	cfg.Exporter.Type = fakeType
+	cfg.QueueConfig = configoptional.Some(queue)
+
+	exp, tel := newTestExporter(t, cfg, fake)
+	released := false
+	defer func() {
+		if !released {
+			close(fake.release)
+		}
+	}()
+
+	// Hold the only consumer inside a send, so that the queue fills up.
+	require.NoError(t, exp.ConsumeLogs(t.Context(), logsWithBuckets("held")))
+	<-fake.entered
+
+	var refused int64
+	for range 10 {
+		if errors.Is(exp.ConsumeLogs(t.Context(), logsWithBuckets("overflow")), exporterhelper.ErrQueueIsFull) {
+			refused++
+		}
+	}
+	require.Positive(t, refused, "the queue was expected to overflow")
+
+	metadatatest.AssertEqualCompletenessDrops(t, tel, []metricdata.DataPoint[int64]{
+		dropDataPoint("overflow", reasonQueueFull, refused),
+	}, ignoreVolatile...)
+
+	close(fake.release)
+	released = true
+}
+
+// A persistent queue is what keeps the count of a segment correct across a
+// restart: the records outlive the process and are counted when they are finally
+// delivered.
+func TestPersistentQueueDelivers(t *testing.T) {
+	storageID := storagetest.NewStorageID("completeness")
+	host := storagetest.NewStorageHost().WithFileBackedStorageExtension(storageID.Name(), t.TempDir())
+
+	queue := noBatchQueue()
+	queue.StorageID = &storageID
+
+	cfg := createDefaultConfig().(*Config)
+	cfg.Segment = testSegment
+	cfg.Exporter.Type = fakeType
+	cfg.QueueConfig = configoptional.Some(queue)
+
+	fake := &fakeExporter{}
+	exp, tel := newTestExporterOn(t, cfg, fake, host)
+
+	require.NoError(t, exp.ConsumeLogs(t.Context(), logsWithBuckets("2026-08-10T21:22:00Z")))
+
+	require.Eventually(t, func() bool {
+		_, err := tel.GetMetric(acksMetric)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+	metadatatest.AssertEqualCompletenessAcks(t, tel, []metricdata.DataPoint[int64]{
+		ackDataPoint("2026-08-10T21:22:00Z", 1),
+	}, ignoreVolatile...)
 }

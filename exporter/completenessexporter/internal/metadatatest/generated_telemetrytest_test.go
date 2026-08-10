@@ -21,7 +21,11 @@ func TestSetupTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	defer tb.Shutdown()
 	tb.CompletenessAcks.Add(context.Background(), 1)
+	tb.CompletenessDrops.Add(context.Background(), 1)
 	AssertEqualCompletenessAcks(t, testTel,
+		[]metricdata.DataPoint[int64]{{Value: 1}},
+		metricdatatest.IgnoreTimestamp())
+	AssertEqualCompletenessDrops(t, testTel,
 		[]metricdata.DataPoint[int64]{{Value: 1}},
 		metricdatatest.IgnoreTimestamp())
 

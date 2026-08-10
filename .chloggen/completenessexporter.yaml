@@ -17,10 +17,11 @@ issues: [46607]
 # Use pipe (|) for multiline entries.
 subtext: |
   The exporter emits `otel_completeness_acks`, counting the log records the wrapped exporter confirmed
-  as delivered, grouped by the ingestion time bucket the records carry. It takes the sending queue over
-  from the exporter it wraps, so the count is taken after the queue and reflects delivery rather than
-  enqueueing. Combined with a count of the records that entered the pipeline it measures the data
-  completeness of a pipeline segment.
+  as delivered, and `otel_completeness_drops`, counting the ones it gave up on, both grouped by the
+  ingestion time bucket the records carry. It takes the sending queue over from the exporter it wraps,
+  so the count is taken after the queue and reflects delivery rather than enqueueing. Combined with a
+  count of the records that entered the pipeline it measures the data completeness of a pipeline
+  segment.
 
 # If your change doesn't affect end users or the exported elements of any package,
 # you should instead start your pull request title with [chore] or use the "Skip Changelog" label.

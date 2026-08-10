@@ -43,7 +43,7 @@ func createLogsExporter(
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewLogs(
+	logs, err := exporterhelper.NewLogs(
 		ctx,
 		set,
 		cfg,
@@ -57,4 +57,8 @@ func createLogsExporter(
 		exporterhelper.WithTimeout(exporterhelper.TimeoutConfig{Timeout: 0}),
 		exporterhelper.WithQueue(oCfg.QueueConfig),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return queueAware{Logs: logs, exp: exp}, nil
 }

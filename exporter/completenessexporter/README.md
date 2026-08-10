@@ -28,6 +28,10 @@ segment:
 completeness = otel_completeness_acks_total / otel_completeness_creates_total
 ```
 
+Across several collectors, divide the acknowledgments of the last segment by the creates of the
+first one and the ratio covers the whole path — see
+[calculating completeness](#calculating-completeness).
+
 Native collector metrics such as `otelcol_exporter_sent_log_records` tell you *that* records were
 dropped, but not *which* ones. By marking every record with a coarse ingestion timestamp as it
 enters the pipeline and only counting that marker once the backend accepted it, drops can be
@@ -113,11 +117,21 @@ configuration — it only needs to be part of the build.
 
 ## Emitted telemetry
 
-The exporter emits one metric as part of the collector's [internal telemetry][internal-telemetry]:
+The exporter emits two metrics as part of the collector's [internal telemetry][internal-telemetry]:
 
-`otel_completeness_acks{bucket="<timestamp>", segment="<collector_id>"}` — the number of log records
-the wrapped exporter delivered. The Prometheus exporter of the internal telemetry renders it as
-`otel_completeness_acks_total`.
+* `otel_completeness_acks{bucket="<timestamp>", segment="<collector_id>"}` — log records the wrapped
+  exporter delivered.
+* `otel_completeness_drops{bucket="<timestamp>", segment="<collector_id>", reason="<reason>"}` — log
+  records this exporter gave up on, so that a loss is reported instead of only being missing from the
+  acknowledgments. The reasons are `send_failed` (the wrapped exporter failed the whole batch, after
+  its own retries), `partially_rejected` (the wrapped exporter named the records it could not send)
+  and `queue_full` (the sending queue of this exporter had no room left).
+
+The Prometheus exporter of the internal telemetry renders them with a `_total` suffix.
+
+For any bucket, `creates - acks - drops` is what is still in flight. It does not settle back to zero
+if the collector is killed with records in a non-persistent queue — see
+[surviving a restart](#surviving-a-restart).
 
 To scrape it, expose the internal telemetry:
 
@@ -237,7 +251,17 @@ service:
 
 ### Calculating completeness
 
-Per segment, grouped by bucket:
+**End to end**, and this is the number to alert on, divide the acknowledgments of the *last* segment
+by the creates of the *first* one. Every segment stamps its creates from what actually arrived, so
+this ratio covers every loss in between — including losses no single segment can see:
+
+```promql
+sum by (bucket) (otel_completeness_acks_total{segment="central-collector"})
+  /
+sum by (bucket) (otel_completeness_creates_total{segment="daemonset-collector"})
+```
+
+**Per segment**, to find out which hop is losing data:
 
 ```promql
 sum by (bucket) (otel_completeness_acks_total{segment="daemonset-collector"})
@@ -245,22 +269,80 @@ sum by (bucket) (otel_completeness_acks_total{segment="daemonset-collector"})
 sum by (bucket) (otel_completeness_creates_total{segment="daemonset-collector"})
 ```
 
-The end-to-end completeness of the pipeline is the product of the per-segment ratios. Buckets stay
-open for as long as records of that bucket are still in flight, so compare buckets that are older
-than the maximum time data can spend in the pipeline (queue + retries) to avoid reporting a
-shortfall that is only a delay.
+**Per hop**, to attribute what is lost *between* two segments — in the network, or inside the next
+collector before its own counting starts:
 
-## What an acknowledgment does not cover
+```promql
+sum by (bucket) (otel_completeness_creates_total{segment="central-collector"})
+  /
+sum by (bucket) (otel_completeness_acks_total{segment="daemonset-collector"})
+```
 
-* **Data lost before the queue is drained.** A non-persistent queue loses its contents when the
-  collector is killed, and those records are correctly never acknowledged — but neither is the loss
-  itself reported anywhere else. Use a [persistent queue][queue] on the completeness exporter if the
-  segment must survive restarts.
-* **Exporters that acknowledge early on their own.** The queue is the usual case and it is handled,
-  but an exporter that answers before its backend did cannot be corrected from the outside. The
-  exporter logs a warning at startup if the wrapped exporter has no sending queue it could take over.
-* **Partial success responses.** An OTLP backend that accepts a batch while rejecting some of its
-  records returns success, and the whole batch is counted as delivered.
+**Where a segment lost its records**, from the drop reasons:
+
+```promql
+sum by (bucket, reason) (otel_completeness_drops_total{segment="daemonset-collector"})
+```
+
+Buckets stay open for as long as records of that bucket are still in flight, so compare buckets that
+are older than the maximum time data can spend in the pipeline (queue + retries) to avoid reporting
+a shortfall that is only a delay.
+
+These are raw counters, which reset when a collector restarts. Comparing them directly is fine while
+the collectors stay up; across restarts, compare the increase over a window that covers the bucket
+instead, so that the reset is accounted for:
+
+```promql
+sum by (bucket) (increase(otel_completeness_acks_total{segment="central-collector"}[1h]))
+  /
+sum by (bucket) (increase(otel_completeness_creates_total{segment="daemonset-collector"}[1h]))
+```
+
+### Surviving a restart
+
+Records sitting in a non-persistent queue are lost if the collector is killed, and nothing can report
+that from a process that is gone. Give the sending queue a [storage extension][queue] and the records
+outlive the process: they are restored on startup and counted when they are finally delivered.
+
+```yaml
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/queue
+
+exporters:
+  completeness:
+    segment: central-collector
+    sending_queue:
+      storage: file_storage
+    exporter:
+      type: clickhouse
+      config:
+        endpoint: tcp://clickhouse:9000
+
+service:
+  extensions: [file_storage]
+```
+
+The bucket travels with the records through the queue, so a record enqueued before a restart is
+still counted against the minute it was originally stamped with.
+
+### Partial success responses
+
+An OTLP backend may accept a batch while rejecting some of its records. Exporters that report those
+records back — as a `consumererror.Logs` — are handled: the rejected records are counted as
+`partially_rejected` drops and only the rest is acknowledged.
+
+The collector's own OTLP exporter is not one of them. It writes a `Partial success response` warning
+to the log and returns success, discarding which records were rejected, so nothing wrapping it can
+tell. On that hop the acknowledgments of the sending segment over-count by the rejected records —
+which is exactly what the end-to-end and per-hop ratios above expose, because the receiving segment
+only ever counts the records that really arrived.
+
+### What is still outside the count
+
+An exporter that answers before its backend did cannot be corrected from the outside. The sending
+queue is the usual case and it is taken over, and a wrapped exporter without one produces a warning
+at startup, but an exporter that buffers internally will acknowledge early.
 
 ## Cardinality
 

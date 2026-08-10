@@ -20,3 +20,19 @@ Number of log records the wrapped exporter confirmed as delivered, grouped by pi
 | ---- | ----------- | ------ |
 | bucket | The pipeline ingestion time bucket that was attached to the log records when they entered the pipeline. | Any Str |
 | segment | Identifier of the pipeline segment reporting the acknowledgment. | Any Str |
+
+### otel_completeness_drops
+
+Number of log records this exporter gave up on, grouped by pipeline ingestion time bucket and reason.
+
+| Unit | Metric Type | Value Type | Monotonic | Stability |
+| ---- | ----------- | ---------- | --------- | --------- |
+| {records} | Sum | Int | true | Development |
+
+#### Attributes
+
+| Name | Description | Values |
+| ---- | ----------- | ------ |
+| bucket | The pipeline ingestion time bucket that was attached to the log records when they entered the pipeline. | Any Str |
+| segment | Identifier of the pipeline segment reporting the acknowledgment. | Any Str |
+| reason | Why the log records were given up on. | Str: ``send_failed``, ``partially_rejected``, ``queue_full`` |

@@ -23,10 +23,11 @@ func Tracer(settings component.TelemetrySettings) trace.Tracer {
 // TelemetryBuilder provides an interface for components to report telemetry
 // as defined in metadata and user config.
 type TelemetryBuilder struct {
-	meter            metric.Meter
-	mu               sync.Mutex
-	registrations    []metric.Registration
-	CompletenessAcks metric.Int64Counter
+	meter             metric.Meter
+	mu                sync.Mutex
+	registrations     []metric.Registration
+	CompletenessAcks  metric.Int64Counter
+	CompletenessDrops metric.Int64Counter
 }
 
 // TelemetryBuilderOption applies changes to default builder.
@@ -61,6 +62,12 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	builder.CompletenessAcks, err = builder.meter.Int64Counter(
 		"otel_completeness_acks",
 		metric.WithDescription("Number of log records the wrapped exporter confirmed as delivered, grouped by pipeline ingestion time bucket. [Development]"),
+		metric.WithUnit("{records}"),
+	)
+	errs = errors.Join(errs, err)
+	builder.CompletenessDrops, err = builder.meter.Int64Counter(
+		"otel_completeness_drops",
+		metric.WithDescription("Number of log records this exporter gave up on, grouped by pipeline ingestion time bucket and reason. [Development]"),
 		metric.WithUnit("{records}"),
 	)
 	errs = errors.Join(errs, err)

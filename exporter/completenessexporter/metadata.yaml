@@ -30,6 +30,13 @@ attributes:
   bucket:
     description: The pipeline ingestion time bucket that was attached to the log records when they entered the pipeline.
     type: string
+  reason:
+    description: Why the log records were given up on.
+    type: string
+    enum:
+      - send_failed
+      - partially_rejected
+      - queue_full
   segment:
     description: Identifier of the pipeline segment reporting the acknowledgment.
     type: string
@@ -43,6 +50,16 @@ telemetry:
       stability: development
       unit: "{records}"
       attributes: [bucket, segment]
+      sum:
+        value_type: int
+        monotonic: true
+    completeness_drops:
+      prefix: otel_
+      enabled: true
+      description: Number of log records this exporter gave up on, grouped by pipeline ingestion time bucket and reason.
+      stability: development
+      unit: "{records}"
+      attributes: [bucket, segment, reason]
       sum:
         value_type: int
         monotonic: true

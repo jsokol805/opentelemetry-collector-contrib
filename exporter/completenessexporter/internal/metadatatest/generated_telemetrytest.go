@@ -36,3 +36,19 @@ func AssertEqualCompletenessAcks(t *testing.T, tt *componenttest.Telemetry, dps 
 	require.NoError(t, err)
 	metricdatatest.AssertEqual(t, want, got, opts...)
 }
+
+func AssertEqualCompletenessDrops(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
+	want := metricdata.Metrics{
+		Name:        "otel_completeness_drops",
+		Description: "Number of log records this exporter gave up on, grouped by pipeline ingestion time bucket and reason. [Development]",
+		Unit:        "{records}",
+		Data: metricdata.Sum[int64]{
+			Temporality: metricdata.CumulativeTemporality,
+			IsMonotonic: true,
+			DataPoints:  dps,
+		},
+	}
+	got, err := tt.GetMetric("otel_completeness_drops")
+	require.NoError(t, err)
+	metricdatatest.AssertEqual(t, want, got, opts...)
+}

@@ -11,7 +11,9 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/xconfmap"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/service/hostcapabilities"
@@ -29,6 +31,16 @@ const (
 
 	bucketAttrKey  = "bucket"
 	segmentAttrKey = "segment"
+	reasonAttrKey  = "reason"
+
+	// Reasons why records were given up on, reported on the drops metric.
+	//
+	// reasonSendFailed is the wrapped exporter failing to send a whole batch,
+	// reasonPartiallyRejected the records of a batch it reported as failed, and
+	// reasonQueueFull a batch the sending queue of this exporter could not accept.
+	reasonSendFailed        = "send_failed"
+	reasonPartiallyRejected = "partially_rejected"
+	reasonQueueFull         = "queue_full"
 
 	// sendingQueueKey is the configuration key of the sending queue, which this
 	// exporter takes over from the exporter it wraps.
@@ -143,26 +155,86 @@ func (e *completenessExporter) shutdown(ctx context.Context) error {
 	return e.inner.Shutdown(ctx)
 }
 
-// pushLogs hands the batch to the wrapped exporter and, only once that exporter
-// reported success, counts the records it contained per ingestion bucket. It is
-// called after this exporter's sending queue, so a success means the data was
-// accepted by the backend.
+// pushLogs hands the batch to the wrapped exporter and counts the records it
+// contained per ingestion bucket: the delivered ones as acknowledgments, the
+// ones that were given up on as drops. It is called after this exporter's
+// sending queue, so an acknowledgment means the data was accepted by the
+// backend.
 func (e *completenessExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 	// The records have to be counted before the batch is handed over: once the
 	// wrapped exporter got it, the data may be modified or recycled.
 	counts := e.countByBucket(ld)
 
-	if err := e.inner.ConsumeLogs(ctx, ld); err != nil {
+	err := e.inner.ConsumeLogs(ctx, ld)
+	if err == nil {
+		e.recordAcks(ctx, counts)
+		return nil
+	}
+
+	// An exporter may report exactly which records it could not send. The rest of
+	// the batch did reach the backend and is acknowledged.
+	var partial consumererror.Logs
+	if errors.As(err, &partial) {
+		rejected := e.countByBucket(partial.Data())
+		e.recordDrops(ctx, rejected, reasonPartiallyRejected)
+		e.recordAcks(ctx, subtractCounts(counts, rejected))
 		return err
 	}
 
+	// This exporter does not retry, that is left to the wrapped exporter, so an
+	// error means the batch is gone.
+	e.recordDrops(ctx, counts, reasonSendFailed)
+	return err
+}
+
+func (e *completenessExporter) recordAcks(ctx context.Context, counts map[string]int64) {
 	for bucket, count := range counts {
+		if count <= 0 {
+			continue
+		}
 		e.telemetryBuilder.CompletenessAcks.Add(ctx, count, metric.WithAttributes(
 			attribute.String(bucketAttrKey, bucket),
 			e.segment,
 		))
 	}
-	return nil
+}
+
+func (e *completenessExporter) recordDrops(ctx context.Context, counts map[string]int64, reason string) {
+	for bucket, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		e.telemetryBuilder.CompletenessDrops.Add(ctx, count, metric.WithAttributes(
+			attribute.String(bucketAttrKey, bucket),
+			e.segment,
+			attribute.String(reasonAttrKey, reason),
+		))
+	}
+}
+
+// subtractCounts returns the records of counts that are not in rejected.
+func subtractCounts(counts, rejected map[string]int64) map[string]int64 {
+	delivered := make(map[string]int64, len(counts))
+	for bucket, count := range counts {
+		delivered[bucket] = count - rejected[bucket]
+	}
+	return delivered
+}
+
+// queueAware accounts for the records this exporter's own sending queue refused
+// to accept. Those never reach pushLogs, so they have to be counted in front of
+// the queue.
+type queueAware struct {
+	exporter.Logs
+	exp *completenessExporter
+}
+
+func (q queueAware) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
+	err := q.Logs.ConsumeLogs(ctx, ld)
+	if errors.Is(err, exporterhelper.ErrQueueIsFull) {
+		q.exp.recordDrops(ctx, q.exp.countByBucket(ld), reasonQueueFull)
+	}
+	return err
 }
 
 // countByBucket returns the number of log records in the batch, keyed by the
